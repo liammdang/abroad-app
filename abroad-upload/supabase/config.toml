@@ -1,0 +1,11 @@
+# Supabase project config (used by the Supabase CLI and Lovable).
+# verify_jwt is off on purpose: each function checks the user itself via Supabase Auth
+# (the gateway check only understands legacy JWT secrets, which new projects may not use).
+[functions.google-token]
+verify_jwt = false
+
+[functions.ical-proxy]
+verify_jwt = false
+
+[functions.ai-chat]
+verify_jwt = false
