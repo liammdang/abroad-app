@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowUp, Sparkles, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { cn } from "@/components/ui";
 import { askAi, buildContext, clearHistory, loadHistory, type ChatMessage } from "@/lib/ai";
@@ -138,14 +138,13 @@ export default function Assistant() {
           )}
           {messages?.map((m) => (
             <div key={m.id} className={cn("flex", m.role === "user" && "justify-end")}>
-              <p
-                className={cn(
-                  "max-w-[88%] whitespace-pre-wrap rounded-3xl px-4 py-2.5",
-                  m.role === "user" ? "rounded-br-lg bg-primary text-white" : "rounded-bl-lg bg-white text-ink",
-                )}
-              >
-                {m.content}
-              </p>
+              {m.role === "user" ? (
+                <p className="max-w-[88%] whitespace-pre-wrap rounded-3xl rounded-br-lg bg-primary px-4 py-2.5 text-white">{m.content}</p>
+              ) : (
+                <div className="max-w-[88%] space-y-2 rounded-3xl rounded-bl-lg bg-white px-5 py-3.5 text-ink">
+                  <Markdown text={m.content} />
+                </div>
+              )}
             </div>
           ))}
           {sending && (
@@ -187,4 +186,98 @@ export default function Assistant() {
       <p className="mt-3 text-center text-[13px] font-light text-muted">AI answers can be wrong. Check official rules with the office or your university.</p>
     </div>
   );
+}
+
+/* ───────────── tiny, safe Markdown renderer for AI answers ─────────────
+   Handles headings, **bold**, *italic*, `code`, [links](url), bare URLs,
+   bullet / numbered lists and --- rules. Builds React elements (no raw HTML). */
+
+function inline(text: string, key = 0): ReactNode[] {
+  const out: ReactNode[] = [];
+  const re = /(\*\*([^*]+)\*\*|__([^_]+)__|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s)<]+[^\s)<.,;:!?])|`([^`]+)`|\*([^*\s][^*]*)\*)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const k = `${key}-${m.index}`;
+    if (m[2] || m[3]) out.push(<strong key={k} className="font-semibold">{inline(m[2] ?? m[3], key + 1)}</strong>);
+    else if (m[4]) out.push(<a key={k} href={m[5]} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">{m[4]}</a>);
+    else if (m[6]) out.push(<a key={k} href={m[6]} target="_blank" rel="noreferrer" className="break-all text-primary underline underline-offset-2">{m[6]}</a>);
+    else if (m[7]) out.push(<code key={k} className="rounded bg-sand px-1.5 py-0.5 text-[0.9em]">{m[7]}</code>);
+    else if (m[8]) out.push(<em key={k}>{m[8]}</em>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+export function Markdown({ text }: { text: string }) {
+  const lines = text.replace(/\r/g, "").split("\n");
+  const blocks: ReactNode[] = [];
+  let list: { ordered: boolean; items: string[] } | null = null;
+  let para: string[] = [];
+
+  const flushPara = () => {
+    if (para.length) {
+      blocks.push(
+        <p key={`p${blocks.length}`} className="leading-relaxed">
+          {para.map((l, i) => (
+            <Fragment key={i}>
+              {i > 0 && <br />}
+              {inline(l, i)}
+            </Fragment>
+          ))}
+        </p>,
+      );
+      para = [];
+    }
+  };
+  const flushList = () => {
+    if (list) {
+      const Tag = list.ordered ? "ol" : "ul";
+      blocks.push(
+        <Tag key={`l${blocks.length}`} className={cn("space-y-1 pl-5 leading-relaxed", list.ordered ? "list-decimal" : "list-disc")}>
+          {list.items.map((it, i) => (
+            <li key={i}>{inline(it, i)}</li>
+          ))}
+        </Tag>,
+      );
+      list = null;
+    }
+  };
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
+    const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    const heading = /^\s*#{1,6}\s+(.*)$/.exec(line);
+    if (!line.trim()) {
+      flushPara();
+      flushList();
+    } else if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      flushPara();
+      flushList();
+      blocks.push(<hr key={`h${blocks.length}`} className="my-1 border-line" />);
+    } else if (heading) {
+      flushPara();
+      flushList();
+      blocks.push(
+        <p key={`t${blocks.length}`} className="pt-1 font-display text-[17px] font-bold">
+          {inline(heading[1].replace(/\*\*/g, ""))}
+        </p>,
+      );
+    } else if (bullet || numbered) {
+      flushPara();
+      const ordered = !bullet;
+      if (list && list.ordered !== ordered) flushList();
+      if (!list) list = { ordered, items: [] };
+      list.items.push((bullet ?? numbered)![1]);
+    } else {
+      flushList();
+      para.push(line);
+    }
+  }
+  flushPara();
+  flushList();
+  return <>{blocks}</>;
 }
