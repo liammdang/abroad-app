@@ -1,12 +1,13 @@
-// AI Companion — chats with Claude about life in the student's host city.
-// Secret needed: ANTHROPIC_API_KEY  (Supabase → Edge Functions → Secrets)
+// AI Companion ‚Äî chats with Google Gemini about life in the student's host city.
+// Secret needed: GEMINI_API_KEY  (Supabase ‚Üí Edge Functions ‚Üí Secrets)
+// Optional secret: GEMINI_MODEL (default "gemini-flash-latest" = Google's newest Flash model)
 // Self-contained single file so it can be pasted into the Supabase dashboard editor.
-import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
-const MODEL = "claude-opus-5-5";
+const MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest";
+const BACKUP_MODEL = "gemini-2.5-flash"; // tried if the model above is not found
 const DAILY_LIMIT = 30; // user messages per user per day
-const HISTORY = 20; // past messages sent to Claude
+const HISTORY = 20; // past messages sent to the AI
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,8 +16,6 @@ const corsHeaders = {
 };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
-const anthropic = new Anthropic(); // reads ANTHROPIC_API_KEY
 
 const SYSTEM = `You are the AI Companion inside "Abroad", an app for exchange students.
 You help one student with everyday life in their host city: residence registration, visas and permits,
@@ -44,7 +43,8 @@ Deno.serve(async (req) => {
   const user = auth.user;
   if (!user) return json({ error: "Not signed in" }, 401);
 
-  if (!Deno.env.get("ANTHROPIC_API_KEY")) return json({ error: "AI is not set up yet (missing ANTHROPIC_API_KEY secret)" }, 500);
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
+  if (!apiKey) return json({ error: "AI is not set up yet (missing GEMINI_API_KEY secret)" }, 500);
 
   const body = await req.json().catch(() => ({}));
   const message = typeof body.message === "string" ? body.message.trim().slice(0, 4000) : "";
@@ -70,33 +70,45 @@ Deno.serve(async (req) => {
     .order("created_at", { ascending: false })
     .limit(HISTORY);
   const history: Msg[] = (past ?? []).reverse().map((m) => ({ role: m.role, content: m.content }));
-  // the API needs the conversation to start with a user turn
+  // the conversation must start with a user turn
   while (history.length && history[0].role !== "user") history.shift();
-  // and to alternate — drop a dangling user turn (e.g. a past request that failed)
+  // and to alternate ‚Äî drop a dangling user turn (e.g. a past request that failed)
   if (history.length && history[history.length - 1].role === "user") history.pop();
 
   const { error: saveErr } = await db.from("ai_messages").insert({ user_id: user.id, role: "user", content: message });
   if (saveErr) return json({ error: saveErr.message }, 500);
 
-  try {
-    const response = await anthropic.beta.messages.create({
-      model: MODEL,
-      max_tokens: 4000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default", // if Claude declines, Anthropic retries on its recommended fallback model
-      output_config: { effort: "low" }, // quick chat answers
-      system: context ? `${SYSTEM}\n\n<student_context>\n${context}\n</student_context>` : SYSTEM,
-      messages: [...history, { role: "user", content: message }],
-    });
+  const request = {
+    systemInstruction: { parts: [{ text: context ? `${SYSTEM}\n\n<student_context>\n${context}\n</student_context>` : SYSTEM }] },
+    contents: [...history, { role: "user", content: message }].map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    })),
+    generationConfig: { maxOutputTokens: 4000, temperature: 0.7 },
+  };
 
-    if (response.stop_reason === "refusal") {
-      const reply = "Sorry — I can't help with that one. Try asking in a different way, or ask me something else about life abroad.";
+  try {
+    let res = await callGemini(MODEL, apiKey, request);
+    if (res.status === 404 && MODEL !== BACKUP_MODEL) res = await callGemini(BACKUP_MODEL, apiKey, request);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      const msg = data?.error?.message ?? `HTTP ${res.status}`;
+      if (res.status === 429) return json({ error: "The AI is busy or out of quota. Please try again in a minute." }, 429);
+      if (res.status === 400 && /api key/i.test(msg)) return json({ error: "GEMINI_API_KEY is invalid" }, 500);
+      if (res.status === 403) return json({ error: `Gemini refused the key: ${msg}` }, 500);
+      return json({ error: `AI error (${res.status}): ${msg}` }, 502);
+    }
+
+    const cand = data?.candidates?.[0];
+    if (data?.promptFeedback?.blockReason || cand?.finishReason === "SAFETY" || cand?.finishReason === "PROHIBITED_CONTENT") {
+      const reply = "Sorry ‚Äî I can't help with that one. Try asking in a different way, or ask me something else about life abroad.";
       return json({ reply, refused: true });
     }
 
-    const reply = response.content
-      .filter((b) => b.type === "text")
-      .map((b) => (b as { text: string }).text)
+    const reply = (cand?.content?.parts ?? [])
+      .filter((p: { text?: string; thought?: boolean }) => typeof p.text === "string" && !p.thought)
+      .map((p: { text: string }) => p.text)
       .join("")
       .trim();
     if (!reply) return json({ error: "Empty answer, please try again" }, 502);
@@ -104,9 +116,15 @@ Deno.serve(async (req) => {
     await db.from("ai_messages").insert({ user_id: user.id, role: "assistant", content: reply });
     return json({ reply });
   } catch (e) {
-    if (e instanceof Anthropic.RateLimitError) return json({ error: "The AI is busy right now. Please try again in a minute." }, 429);
-    if (e instanceof Anthropic.AuthenticationError) return json({ error: "ANTHROPIC_API_KEY is invalid" }, 500);
-    if (e instanceof Anthropic.APIError) return json({ error: `AI error (${e.status}): ${e.message}` }, 502);
     return json({ error: `AI error: ${(e as Error).message}` }, 500);
   }
 });
+
+function callGemini(model: string, apiKey: string, body: unknown) {
+  return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60_000),
+  });
+}
