@@ -11,9 +11,9 @@ Không có backend, app chạy ở **chế độ demo** (dữ liệu mẫu, lưu
 | Google Calendar hai chiều (lịch học, deadline…) | Google Calendar API + hàm `google-token` (Bước 3, 6) |
 | Smart Email (đọc Gmail thật, tự chia nhóm) | Gmail API + hàm `google-token` (Bước 3, 6) |
 | Theo dõi link iCal thời khoá biểu của trường | Hàm `ical-proxy` (Bước 6) |
-| **AI Companion** (chat AI thật, biết thành phố, checklist, lịch của bạn) | Hàm `ai-chat` + API key Anthropic (Bước 6, 7) |
+| **AI Companion** (chat AI thật, biết thành phố, checklist, lịch của bạn) | Hàm `ai-chat` + API key Google Gemini (Bước 6, 7) |
 
-**Thời gian:** khoảng 45–60 phút. **Chi phí:** Supabase và Google miễn phí. AI tốn khoảng 1–3 cent mỗi câu hỏi (nạp tối thiểu 5 USD là dùng được rất lâu).
+**Thời gian:** khoảng 45–60 phút. **Chi phí:** Supabase và Google miễn phí. AI (Gemini Flash) tốn rất ít, chưa tới 1 cent mỗi câu hỏi.
 
 > Mẹo: mở một file ghi chú trống để dán các giá trị bạn sẽ copy (Project URL, anon key, Client ID, Client secret, API key). Đừng gửi các giá trị **secret** cho ai, đừng commit lên GitHub.
 
@@ -62,6 +62,8 @@ Org "Bach Institut" của bạn đang ở gói Free, cho phép **2 project đang
 5. *(Không bắt buộc)* Muốn Community có sẵn vài meetup và chuyến đi mẫu: **New query** → dán `supabase/seed.sql` → **Run**.
 
 > File này chỉ chạy **một lần** trên project mới. Chạy lại lần 2 sẽ báo lỗi `policy ... already exists`. Lỗi đó vô hại: database đã có rồi.
+>
+> **Database đã tạo từ bản cũ?** Không chạy lại cả file. Chỉ cần **New query** → dán file `supabase/migrations/20261112000200_personalize.sql` → **Run**. File này thêm chỗ lưu kế hoạch AI và mở khoá mọi thành phố. Chạy nhiều lần cũng không sao.
 
 ---
 
@@ -163,26 +165,26 @@ Supabase → **Edge Functions → Secrets** (hoặc Project Settings → Edge Fu
 |---|---|
 | `GOOGLE_CLIENT_ID` | Client ID ở Bước 4 |
 | `GOOGLE_CLIENT_SECRET` | Client secret ở Bước 4 |
-| `ANTHROPIC_API_KEY` | Key ở Bước 7 (làm Bước 7 xong quay lại thêm) |
+| `GEMINI_API_KEY` | Key ở Bước 7 (làm Bước 7 xong quay lại thêm) |
 
 Bấm **Save**. Các biến `SUPABASE_URL`, `SUPABASE_ANON_KEY` và `SUPABASE_SERVICE_ROLE_KEY` Supabase tự có sẵn, **không** cần thêm.
 
 ---
 
-## Bước 7 — API key cho AI Companion (Claude)
+## Bước 7 — API key cho AI Companion (Google Gemini)
 
-AI Companion dùng **Claude Opus 5.5** của Anthropic. Mỗi câu hỏi, app gửi kèm thông tin của bạn để câu trả lời sát thực tế: thành phố, trường, ngày ở, checklist còn thiếu và 12 sự kiện sắp tới. App còn bật **fallback phía server**: nếu Claude từ chối một câu, Anthropic tự thử lại bằng model dự phòng.
+AI Companion dùng **Google Gemini** (mặc định model Flash mới nhất). Mỗi câu hỏi, app gửi kèm thông tin của bạn để câu trả lời sát thực tế: thành phố, trường, ngày ở, checklist còn thiếu và 12 sự kiện sắp tới.
 
-1. Vào https://console.anthropic.com → đăng ký hoặc đăng nhập.
-2. **Settings → Billing** → nạp credit (tối thiểu 5 USD; mỗi câu khoảng 1–3 cent).
-3. **Settings → API Keys** → **Create Key** → đặt tên `abroad` → copy key (dạng `sk-ant-...`, chỉ hiện 1 lần).
-4. Quay lại Supabase → **Edge Functions → Secrets** → thêm `ANTHROPIC_API_KEY` = key vừa copy.
+1. Vào https://aistudio.google.com/apikey → đăng nhập Google.
+2. Bấm **Create API key** → chọn Google Cloud project đã bật thanh toán → copy key (dạng `AIza...`).
+3. Quay lại Supabase → **Edge Functions → Secrets** → thêm `GEMINI_API_KEY` = key vừa copy.
+4. (Không bắt buộc) Muốn chọn model khác: thêm secret `GEMINI_MODEL`, vd. `gemini-2.5-pro`.
 
 Giới hạn có sẵn trong code (`supabase/functions/ai-chat/index.ts`, đầu file):
 - `DAILY_LIMIT = 30` câu mỗi người mỗi ngày, để không ai đốt hết credit.
 - `HISTORY = 20` tin nhắn gần nhất được nhớ.
 
-Muốn đổi thì sửa số rồi deploy lại hàm. Bạn cũng có thể đặt **giới hạn chi tiêu hàng tháng** trong console Anthropic (**Settings → Limits**).
+Muốn đổi thì sửa số rồi deploy lại hàm. Bạn cũng có thể đặt **ngân sách** trong Google Cloud (**Billing → Budgets & alerts**).
 
 ---
 
@@ -272,9 +274,10 @@ Mở link app → đăng nhập → làm lại danh sách thử ở Bước 8.
 | "No Google connection — please sign in with Google again" | Hàm `google-token` chưa deploy, hoặc thiếu secret `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`. Sửa xong → Sign out → Sign in |
 | Calendar/Gmail báo lỗi `invalid_grant` sau 1 tuần | Phiên Google ở chế độ Testing hết hạn sau 7 ngày → Sign out → Sign in |
 | "Gmail API has not been used in project…" | Chưa bật Gmail API / Calendar API (Bước 3.2), hoặc bật nhầm project |
-| AI: "AI is not set up yet (missing ANTHROPIC_API_KEY secret)" | Thêm secret ở Bước 7 |
-| AI: "ANTHROPIC_API_KEY is invalid" | Key sai hoặc đã xoá → tạo key mới |
-| AI: lỗi 400 nhắc tới *credit balance* | Tài khoản Anthropic hết tiền → nạp thêm |
+| AI: "AI is not set up yet (missing GEMINI_API_KEY secret)" | Thêm secret ở Bước 7 |
+| AI: "GEMINI_API_KEY is invalid" | Key sai hoặc đã xoá → tạo key mới ở aistudio.google.com/apikey |
+| AI: "busy or out of quota" | Hết hạn mức / chưa bật thanh toán cho project của key → kiểm tra Billing trong Google Cloud |
+| AI: lỗi 404 model not found | Thêm secret `GEMINI_MODEL` với tên model đang có trong AI Studio |
 | AI: "Daily limit reached" | Đã hỏi 30 câu hôm nay. Đổi `DAILY_LIMIT` trong `ai-chat` rồi deploy lại nếu cần |
 | `Failed to send a request to the Edge Function` | Tên hàm sai (phải đúng `ai-chat`, `google-token`, `ical-proxy`) hoặc chưa deploy |
 | Gọi hàm bị 401 | Chưa tắt **Verify JWT** của hàm (Bước 6, mục 5), hoặc phiên hết hạn → đăng nhập lại |
@@ -289,7 +292,7 @@ Mở link app → đăng nhập → làm lại danh sách thử ở Bước 8.
 
 - Mọi bảng đều bật **Row Level Security**: mỗi người chỉ đọc và sửa dữ liệu của chính mình. Meetup và chuyến đi thì ai đăng nhập cũng xem được, nhưng chỉ người tạo mới xoá được.
 - **Refresh token Google** và **lịch sử chat AI** chỉ hàm trên server mới ghi được. Trình duyệt không đọc được token Google.
-- `GOOGLE_CLIENT_SECRET` và `ANTHROPIC_API_KEY` chỉ nằm trong **Secrets của Supabase**, không bao giờ để trong code, `.env` hay GitHub.
+- `GOOGLE_CLIENT_SECRET` và `GEMINI_API_KEY` chỉ nằm trong **Secrets của Supabase**, không bao giờ để trong code, `.env` hay GitHub.
 - Khi **Sign out**, app thu hồi luôn quyền Google.
 - App chỉ **đọc** Gmail (`gmail.readonly`), không gửi hay xoá thư.
 - Người dùng có thể xoá toàn bộ lịch sử chat bằng nút **Clear** trên trang AI Companion.

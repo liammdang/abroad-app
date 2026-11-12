@@ -16,7 +16,7 @@ Built with **Vite + React + TypeScript + Tailwind CSS**, the same stack Lovable 
 ### Two modes
 
 - **Demo mode** (not signed in, or no backend connected): sample data for the chosen city, saved in the browser. Good for presentations.
-- **Live mode** (signed in with Google): everything is real. The Supabase backend stores your profile, Life Admin progress and calendar imports. Google Calendar sync is two-way (it reads your calendar and writes to an "Abroad" calendar). Smart Email reads your real Gmail. The community board is shared and updates in realtime. iCal feed links are fetched through an edge function. The **AI Companion** is a real chat with Claude (Opus 5.5), aware of your city, checklist and calendar, with history saved per user.
+- **Live mode** (signed in with Google): everything is real. The Supabase backend stores your profile, Life Admin progress and calendar imports. Google Calendar sync is two-way (it reads your calendar and writes to an "Abroad" calendar). Smart Email reads your real Gmail. The community board is shared and updates in realtime. iCal feed links are fetched through an edge function. The **AI Companion** is a real chat with Google Gemini, aware of your city, checklist and calendar, with history saved per user.
 
 **To turn on live mode, follow [SETUP.md](SETUP.md)** (Vietnamese, step by step).
 
@@ -63,4 +63,4 @@ supabase/
 ## Lovable notes
 
 - The Supabase client reads `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (or `VITE_SUPABASE_ANON_KEY`). When you connect Supabase in Lovable, make sure these are set.
-- Lovable deploys `supabase/functions/*` automatically. Add the `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `ANTHROPIC_API_KEY` secrets in Supabase.
+- Lovable deploys `supabase/functions/*` automatically. Add the `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GEMINI_API_KEY` secrets in Supabase.

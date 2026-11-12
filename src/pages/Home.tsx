@@ -116,7 +116,7 @@ export default function Home() {
             <span className="font-display text-6xl font-bold text-primary">{arrivalDone}</span>
             <span className="text-lg text-muted">of {arrival.length} arrival steps done</span>
           </div>
-          <ProgressBar value={arrivalDone / arrival.length} className="mt-4" />
+          <ProgressBar value={arrival.length ? arrivalDone / arrival.length : 0} className="mt-4" />
           {nextStep && (
             <div className="mt-6 rounded-3xl border border-dashed border-line px-4 py-3.5">
               <p className="text-sm text-muted">Next step</p>

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useApp } from "@/state/AppState";
 import { onToast } from "@/lib/toast";
+import { FloatingChat } from "./FloatingChat";
 import { cn } from "./ui";
 
 const NAV = [
@@ -113,6 +114,8 @@ export default function Layout() {
           </NavLink>
         ))}
       </nav>
+
+      <FloatingChat />
 
       {msg && (
         <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-5 py-3 text-sm text-white shadow-lg md:bottom-8">

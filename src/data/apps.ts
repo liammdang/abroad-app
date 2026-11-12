@@ -1,4 +1,4 @@
-import type { CityId } from "./types";
+import type { BuiltInCityId, CityId } from "./types";
 
 export type AppCategory = "transport" | "money" | "housing" | "food" | "health" | "everyday";
 
@@ -30,7 +30,7 @@ const COMMON: EssentialApp[] = [
   { id: "app-tgtg", name: "Too Good To Go", category: "food", why: "Cheap leftover food bags from bakeries and restaurants." },
 ];
 
-const BY_CITY: Record<CityId, EssentialApp[]> = {
+const BY_CITY: Record<BuiltInCityId, EssentialApp[]> = {
   berlin: [
     { id: "app-bvg", name: "BVG Fahrinfo", category: "transport", why: "Berlin's U-Bahn, S-Bahn, tram and bus times plus tickets.", essential: true },
     { id: "app-db", name: "DB Navigator", category: "transport", why: "Deutsche Bahn trains and the Deutschlandticket across Germany.", essential: true },
@@ -66,7 +66,8 @@ const BY_CITY: Record<CityId, EssentialApp[]> = {
   ],
 };
 
-export const appsFor = (city: CityId): EssentialApp[] => [...BY_CITY[city], ...COMMON];
+export const COMMON_APPS = COMMON;
+export const appsFor = (city: CityId): EssentialApp[] => [...(BY_CITY[city as BuiltInCityId] ?? []), ...COMMON];
 
 /** Opens the store search for this app on the visitor's device. */
 export function storeLink(name: string): string {

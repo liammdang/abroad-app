@@ -1,5 +1,5 @@
-import { CalendarPlus, ChevronLeft, ChevronRight, Link2, RefreshCw, Trash2, Upload } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { CalendarPlus, ChevronLeft, ChevronRight, Link2, Plus, RefreshCw, Sparkles, Trash2, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Empty, Modal, PageHeader, cn } from "@/components/ui";
 import { EVENT_CATEGORIES, categoryColor, categoryLabel } from "@/data/cities";
@@ -21,17 +21,29 @@ const WEEK = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 /** does the event happen on this ISO day (multi-day trips included) */
 const onDay = (e: CalEvent, iso: string) => e.date === iso || (!!e.endDate && e.date <= iso && iso <= e.endDate);
 
-function EventRow({ e }: { e: CalEvent }) {
+const SOURCE_LABEL: Record<string, string> = {
+  google: "Google Calendar",
+  ical: "Timetable feed",
+  manual: "Added by you",
+  plan: "From your AI plan",
+};
+
+function EventRow({ e, onDelete }: { e: CalEvent; onDelete?: () => void }) {
   return (
     <div className="flex items-start gap-3">
       <span className={cn("mt-2 h-2.5 w-2.5 shrink-0 rounded-full", categoryColor(e.category))} />
       <div className="min-w-0 flex-1">
         <p className="text-[17px] leading-snug text-ink">{e.title}</p>
         <p className="text-sm font-light text-muted">
-          {[e.time, e.place, e.source === "google" ? "Google Calendar" : e.source === "ical" ? "Timetable feed" : null].filter(Boolean).join(" · ")}
+          {[e.time, e.place, SOURCE_LABEL[e.source ?? ""]].filter(Boolean).join(" · ")}
         </p>
       </div>
       <span className="shrink-0 rounded-full bg-sand px-2.5 py-0.5 text-[13px] text-muted">{categoryLabel(e.category)}</span>
+      {onDelete && (
+        <button aria-label="Delete event" className="mt-0.5 shrink-0 text-muted hover:text-cat-exam" onClick={onDelete}>
+          <Trash2 className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -48,6 +60,18 @@ export default function CalendarPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [view, setView] = useState<"month" | "list">("month");
   const [icalOpen, setIcalOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [autoSync, setAutoSync] = useState(false);
+  const googleOn = app.mode === "live" && app.integrations.googleCalendar && app.googleConnected.calendar;
+  const planCount = app.events.filter((e) => e.source === "plan").length;
+
+  // after adding an event, copy it to Google once the new list has loaded
+  useEffect(() => {
+    if (!autoSync) return;
+    setAutoSync(false);
+    void app.syncGoogle().catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [app.events]);
 
   const cats = FILTERS.find((f) => f.id === filter)!.cats;
   const events = useMemo(() => app.events.filter((e) => cats.includes(e.category)), [app.events, cats]);
@@ -97,12 +121,25 @@ export default function CalendarPage() {
             <button className="btn-outline" onClick={() => void syncGoogle()} disabled={syncing}>
               <RefreshCw className={cn("h-[18px] w-[18px]", syncing && "animate-spin")} /> {syncing ? "Syncing…" : "Sync Google"}
             </button>
-            <button className="btn-primary" onClick={() => setIcalOpen(true)}>
+            <button className="btn-outline" onClick={() => setIcalOpen(true)}>
               <CalendarPlus className="h-[18px] w-[18px]" /> iCal feed
+            </button>
+            <button className="btn-primary" onClick={() => setAddOpen(true)}>
+              <Plus className="h-[18px] w-[18px]" /> Add event
             </button>
           </div>
         }
       />
+
+      {planCount > 0 && (
+        <p className="mb-5 flex items-start gap-2 rounded-2xl bg-lavender-soft px-4 py-3 text-[15px] text-ink">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <span>
+            Your AI plan added <b>{planCount} key dates</b> (deadlines, appointments, orientation).
+            {googleOn ? " Tap Sync Google to copy them to your Google Calendar." : " Connect Google Calendar in Settings to get them on your phone."}
+          </span>
+        </p>
+      )}
 
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
@@ -195,11 +232,26 @@ export default function CalendarPage() {
         </section>
 
         <aside className="card p-6">
-          <h2 className="mb-5 text-xl font-bold">{panelDate(selected)}</h2>
+          <div className="mb-5 flex items-center justify-between gap-3">
+            <h2 className="text-xl font-bold">{panelDate(selected)}</h2>
+            <button aria-label="Add event on this day" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-lavender text-primary hover:bg-primary hover:text-white" onClick={() => setAddOpen(true)}>
+              <Plus className="h-5 w-5" />
+            </button>
+          </div>
           <div className="space-y-5">
             {dayEvents.length === 0 && <p className="text-muted">Nothing planned for this day.</p>}
             {dayEvents.map((e) => (
-              <EventRow key={e.id} e={e} />
+              <EventRow
+                key={e.id}
+                e={e}
+                onDelete={
+                  e.source === "manual"
+                    ? () => {
+                        if (window.confirm(`Delete "${e.title}"?`)) void app.deleteEvent(e.id);
+                      }
+                    : undefined
+                }
+              />
             ))}
           </div>
           {app.googleError && <p className="mt-8 text-xs text-cat-exam">Google Calendar: {app.googleError}</p>}
@@ -210,7 +262,99 @@ export default function CalendarPage() {
       </div>
 
       <ICalModal open={icalOpen} onClose={() => setIcalOpen(false)} />
+      <AddEventModal
+        open={addOpen}
+        date={selected}
+        googleOn={googleOn}
+        onClose={() => setAddOpen(false)}
+        onAdded={(iso) => {
+          setSelected(iso);
+          const d = parseISO(iso);
+          setCursor({ y: d.getFullYear(), m: d.getMonth() });
+          if (googleOn) setAutoSync(true);
+        }}
+      />
     </div>
+  );
+}
+
+function AddEventModal({
+  open,
+  date,
+  googleOn,
+  onClose,
+  onAdded,
+}: {
+  open: boolean;
+  date: string;
+  googleOn: boolean;
+  onClose: () => void;
+  onAdded: (iso: string) => void;
+}) {
+  const app = useApp();
+  const [form, setForm] = useState({ title: "", date, time: "", place: "", category: "class" as EventCategory });
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (open) setForm({ title: "", date, time: "", place: "", category: "class" });
+  }, [open, date]);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await app.addEvent({ title: form.title.trim(), date: form.date, time: form.time || undefined, place: form.place.trim() || undefined, category: form.category });
+      toast(googleOn ? "Event added — copying it to Google Calendar…" : "Event added");
+      onAdded(form.date);
+      onClose();
+    } catch {
+      /* toast already shown */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add an event">
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (form.title.trim() && form.date) void submit();
+        }}
+      >
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium">Title</span>
+          <input className="input" autoFocus placeholder="e.g. Marketing lecture, Anmeldung appointment" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label>
+            <span className="mb-1.5 block text-sm font-medium">Date</span>
+            <input type="date" className="input" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          </label>
+          <label>
+            <span className="mb-1.5 block text-sm font-medium">Time <span className="font-light text-muted">· optional</span></span>
+            <input type="time" className="input" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
+          </label>
+        </div>
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium">Place <span className="font-light text-muted">· optional</span></span>
+          <input className="input" placeholder="Room, address or link" value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} />
+        </label>
+        <div>
+          <span className="mb-2 block text-sm font-medium">Type</span>
+          <div className="flex flex-wrap gap-2">
+            {EVENT_CATEGORIES.map((c) => (
+              <button type="button" key={c.id} className={cn("pill", form.category === c.id && "pill-active")} onClick={() => setForm({ ...form, category: c.id })}>
+                <span className={cn("h-2 w-2 rounded-full", c.color)} /> {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button type="submit" className="btn-primary w-full py-3" disabled={busy || !form.title.trim() || !form.date}>
+          <Plus className="h-[18px] w-[18px]" /> {busy ? "Adding…" : "Add to calendar"}
+        </button>
+        {googleOn && <p className="text-center text-xs text-muted">It is also copied to your “Abroad” calendar in Google.</p>}
+      </form>
+    </Modal>
   );
 }
 

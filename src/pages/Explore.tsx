@@ -66,6 +66,11 @@ function LocalSpots() {
           </button>
         ))}
       </div>
+      {spots.length === 0 && (
+        <p className="card p-8 text-center font-light text-muted">
+          No spots yet for {city.name}. Finish your setup while signed in and the AI will suggest places that match your interests.
+        </p>
+      )}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
         {spots.map((s) => (
           <article key={s.id} className="card flex flex-col p-6">
@@ -426,7 +431,7 @@ function EssentialApps() {
   const app = useApp();
   const { city } = app;
   const [cat, setCat] = useState<AppCategory | "all">("all");
-  const all = appsFor(city.id);
+  const all = city.apps?.length ? city.apps : appsFor(city.id);
   const list = all
     .filter((a) => cat === "all" || a.category === cat)
     .sort((a, b) => Number(!!b.essential) - Number(!!a.essential));

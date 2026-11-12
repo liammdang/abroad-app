@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Download, FileText, Lightbulb, MapPin } from "lucide-react";
+import { Check, ChevronDown, Download, FileText, Lightbulb, MapPin, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { PageHeader, ProgressBar, cn } from "@/components/ui";
 import { mapsUrl } from "@/data/cities";
@@ -16,7 +16,7 @@ export default function LifeAdmin() {
 
   const all = city.phases.flatMap((p) => p.items);
   const doneCount = all.filter((t) => isDone(t.id)).length;
-  const phase = city.phases.find((p) => p.id === phaseId)!;
+  const phase = city.phases.find((p) => p.id === phaseId) ?? city.phases[0];
 
   return (
     <div>
@@ -35,10 +35,20 @@ export default function LifeAdmin() {
                 {doneCount}/{all.length}
               </span>
             </div>
-            <ProgressBar value={doneCount / all.length} />
+            <ProgressBar value={all.length ? doneCount / all.length : 0} />
           </div>
         }
       />
+
+      {city.summary && (
+        <div className="card mb-6 flex items-start gap-3 bg-lavender-soft p-5">
+          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <p className="font-semibold text-primary">Personalized for you by AI</p>
+            <p className="mt-1 font-light text-ink/85">{city.summary}</p>
+          </div>
+        </div>
+      )}
 
       <div className="-mx-4 mb-6 flex gap-2.5 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">
         {city.phases.map((p) => {

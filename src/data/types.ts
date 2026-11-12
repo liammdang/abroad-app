@@ -1,4 +1,7 @@
-export type CityId = "berlin" | "madrid" | "lisbon";
+/** Cities with hand-made content (used in demo mode and as a fallback). */
+export type BuiltInCityId = "berlin" | "madrid" | "lisbon";
+/** Any city: a built-in id or a slug like "cologne" for AI-personalized cities. */
+export type CityId = string;
 
 export type EventCategory = "class" | "exam" | "assignment" | "admin" | "travel" | "social";
 
@@ -67,7 +70,7 @@ export interface CalEvent {
   time?: string;
   place?: string;
   category: EventCategory;
-  source?: "sample" | "trip" | "meetup" | "ical" | "google" | "stay" | "upload";
+  source?: "sample" | "trip" | "meetup" | "ical" | "google" | "stay" | "upload" | "manual" | "plan";
 }
 
 export type MailFolder = "university" | "immigration" | "housing";
@@ -100,4 +103,32 @@ export interface City {
   inbox: Mail[];
   mailRules: { immigration: string[]; housing: string[] };
   ai: { question: string; answer: string };
+  /** AI-personalized extras */
+  apps?: import("./apps").EssentialApp[];
+  keyDates?: KeyDate[];
+  summary?: string;
+  personalized?: boolean;
+}
+
+export interface KeyDate {
+  title: string;
+  date: string; // ISO
+  category: EventCategory;
+}
+
+/** Everything Gemini generates for one student during onboarding. Stored in profiles.city_pack. */
+export interface CityPack {
+  city: string;
+  country: string;
+  flag: string;
+  greeting: string;
+  summary: string;
+  universityDomain?: string;
+  phases: Phase[];
+  spots: Spot[];
+  apps: import("./apps").EssentialApp[];
+  keyDates: KeyDate[];
+  mailRules: { immigration: string[]; housing: string[] };
+  ai: { question: string; answer: string };
+  generatedAt: string;
 }

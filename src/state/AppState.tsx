@@ -1,7 +1,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { CITIES } from "@/data/cities";
-import type { CalEvent, City, CityId, Meetup, Trip } from "@/data/types";
+import { builtInCity, cityFromPack, genericCity } from "@/data/cities";
+import type { CalEvent, City, CityId, CityPack, Meetup, Trip } from "@/data/types";
 import { addDays, setRealToday, todayISO } from "@/lib/date";
 import {
   clearGoogleToken,
@@ -33,7 +33,19 @@ export interface Profile {
   start: string;
   end: string;
   interests: string[];
+  /** display name + country for cities without hand-made content */
+  cityName?: string;
+  country?: string;
+  /** nationality / home country — drives visa & paperwork advice */
+  homeCountry?: string;
+  program?: string;
+  /** free text the student wants the AI to know */
+  about?: string;
+  /** AI-generated content for this student (null = not personalized yet) */
+  pack?: CityPack | null;
 }
+
+export type NewEvent = Pick<CalEvent, "title" | "date" | "time" | "place" | "category">;
 
 export interface Integrations {
   googleCalendar: boolean;
@@ -152,7 +164,7 @@ const EMPTY_LIVE: LiveState = {
 
 interface MeetupRow {
   id: string;
-  city_id: CityId;
+  city_id: string;
   category: string;
   title: string;
   date: string;
@@ -165,7 +177,7 @@ interface MeetupRow {
 
 interface TripRow {
   id: string;
-  city_id: CityId;
+  city_id: string;
   destination: string;
   start_date: string;
   end_date: string;
@@ -216,6 +228,8 @@ interface AppStateValue {
   deleteTrip: (id: string) => Promise<void>;
   deleteMeetup: (id: string) => Promise<void>;
   importEvents: (events: CalEvent[]) => Promise<void>;
+  addEvent: (e: NewEvent) => Promise<void>;
+  deleteEvent: (id: string) => Promise<void>;
   clearImported: () => Promise<void>;
   addFeed: (url: string) => Promise<number>;
   removeFeed: (url: string) => Promise<void>;
@@ -295,6 +309,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
             start: p.start_date,
             end: p.end_date,
             interests: p.interests ?? [],
+            cityName: p.city_name ?? undefined,
+            country: p.country ?? undefined,
+            homeCountry: p.home_country ?? undefined,
+            program: p.program ?? undefined,
+            about: p.about ?? undefined,
+            pack: (p.city_pack as CityPack | null) ?? null,
           }
         : null,
       integrations: { ...EMPTY_LIVE.integrations, ...(p?.integrations ?? {}) },
@@ -307,7 +327,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         time: r.time ?? undefined,
         place: r.place ?? undefined,
         category: r.category,
-        source: "upload" as const,
+        source: String(r.id).startsWith("manual-") ? ("manual" as const) : ("upload" as const),
       })),
       feeds: (feeds.data ?? []).map((r) => r.url),
       waitlist: wait,
@@ -330,7 +350,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     mode === "live"
       ? live.profile ?? { ...DEFAULT_PROFILE, name: (userMeta?.full_name ?? userMeta?.name ?? "").split(" ")[0] || "" }
       : demo.profile;
-  const city = CITIES[profile.cityId];
+  const city: City = useMemo(() => {
+    if (profile.pack) return cityFromPack(profile.pack, profile.university);
+    return builtInCity(profile.cityId) ?? genericCity(profile.cityName ?? profile.cityId, profile.country ?? "", profile.university);
+  }, [profile.pack, profile.university, profile.cityId, profile.cityName, profile.country]);
   const integrations = mode === "live" ? live.integrations : demo.integrations;
   const initials = useMemo(() => initialsOf(profile.name), [profile.name]);
 
@@ -479,8 +502,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     const meetupEvents: CalEvent[] = meetups
       .filter((m) => m.mine)
       .map((m) => ({ id: `meetup-${m.id}`, title: m.title, date: m.date, time: m.time, place: m.place, category: "social", source: "meetup" }));
+    // key dates from the AI plan (e.g. "Register your address by …") go on the calendar automatically
+    const planEvents: CalEvent[] = (city.keyDates ?? []).map((k, i) => ({
+      id: `plan-${city.id}-${i}-${k.date}`,
+      title: k.title,
+      date: k.date,
+      category: k.category,
+      source: "plan",
+    }));
     const base = mode === "live" ? [...live.userEvents, ...feedEvents] : [...city.events, ...demo.importedEvents];
-    return [...stay, ...base, ...tripEvents, ...meetupEvents];
+    return [...stay, ...planEvents, ...base, ...tripEvents, ...meetupEvents];
   }, [profile, city, trips, meetups, mode, live.userEvents, feedEvents, demo.importedEvents]);
 
   const events = useMemo(
@@ -545,7 +576,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     googleError,
     meetups,
     trips,
-    importedCount: mode === "live" ? live.userEvents.length : demo.importedEvents.length,
+    importedCount: (mode === "live" ? live.userEvents : demo.importedEvents).filter((e) => !e.id.startsWith("manual-")).length,
     feeds: mode === "live" ? live.feeds : [],
     waitlist: mode === "live" ? live.waitlist : demo.waitlist,
 
@@ -676,10 +707,37 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       await loadLive(u);
     },
 
-    clearImported: async () => {
-      if (mode === "demo") return setDemo((s) => ({ ...s, importedEvents: [] }));
+    addEvent: async (e) => {
+      const ev: CalEvent = { ...e, id: `manual-${Date.now()}`, source: "manual" };
+      if (mode === "demo") return setDemo((s) => ({ ...s, importedEvents: [...s.importedEvents, ev] }));
       const { sb, uid: u } = requireDb();
-      report((await sb.from("user_events").delete().eq("user_id", u)).error);
+      report(
+        (
+          await sb.from("user_events").insert({
+            user_id: u,
+            id: ev.id,
+            title: ev.title,
+            date: ev.date,
+            time: ev.time || null,
+            place: ev.place || null,
+            category: ev.category,
+          })
+        ).error,
+      );
+      await loadLive(u);
+    },
+
+    deleteEvent: async (id) => {
+      if (mode === "demo") return setDemo((s) => ({ ...s, importedEvents: s.importedEvents.filter((e) => e.id !== id) }));
+      const { sb, uid: u } = requireDb();
+      report((await sb.from("user_events").delete().eq("user_id", u).eq("id", id)).error);
+      await loadLive(u);
+    },
+
+    clearImported: async () => {
+      if (mode === "demo") return setDemo((s) => ({ ...s, importedEvents: s.importedEvents.filter((e) => e.id.startsWith("manual-")) }));
+      const { sb, uid: u } = requireDb();
+      report((await sb.from("user_events").delete().eq("user_id", u).not("id", "like", "manual-%")).error);
       await loadLive(u);
     },
 
@@ -745,6 +803,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         start_date: p.start,
         end_date: p.end,
         interests: p.interests,
+        city_name: p.cityName ?? null,
+        country: p.country ?? null,
+        home_country: p.homeCountry ?? null,
+        program: p.program ?? null,
+        about: p.about ?? null,
+        city_pack: p.pack ?? null,
         integrations: live.integrations,
         updated_at: new Date().toISOString(),
       });
